@@ -17,7 +17,7 @@ import xsbti.compile.CompilerBridgeProvider
 abstract class BridgeProviderSpecification extends UnitSpec {
   def currentBase: File = new File(".")
   def currentTarget: File = currentBase / "target" / "ivyhome"
-  def currentManaged: File = currentBase / "target" / "lib_managed"
+  def currentManaged: File = (currentBase / "target" / "lib_managed").getAbsoluteFile
 
   val resolvers = Array(ZincComponentCompiler.LocalResolver, Resolver.mavenCentral)
   private val ivyConfiguration =

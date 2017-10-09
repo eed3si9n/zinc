@@ -224,6 +224,41 @@ final class AnalyzingCompiler(
     argsObj.asInstanceOf[Array[String]].toSeq
   }
 
+  def interactiveConsole(
+      classpath: Seq[File],
+      options: Seq[String],
+      initialCommands: String,
+      cleanupCommands: String,
+      log: Logger
+  )(loader: Option[ClassLoader] = None,
+    bindings: Seq[(String, Any)] = Nil): xsbti.InteractiveConsoleInterface = {
+    onArgsHandler(consoleCommandArguments(classpath, options, log))
+    val (classpathString, bootClasspath) = consoleClasspaths(classpath)
+    val (names, values) = bindings.unzip
+    val argsObj = call("xsbt.InteractiveConsoleFactory", "createConsole", log)(
+      classOf[Array[String]],
+      classOf[String],
+      classOf[String],
+      classOf[String],
+      classOf[String],
+      classOf[ClassLoader],
+      classOf[Array[String]],
+      classOf[Array[Any]],
+      classOf[xLogger]
+    )(
+      options.toArray[String]: Array[String],
+      bootClasspath,
+      classpathString,
+      initialCommands,
+      cleanupCommands,
+      loader.orNull,
+      names.toArray[String],
+      values.toArray[Any],
+      log
+    )
+    argsObj.asInstanceOf[xsbti.InteractiveConsoleInterface]
+  }
+
   def force(log: Logger): Unit = { provider.fetchCompiledBridge(scalaInstance, log); () }
 
   private def call(
