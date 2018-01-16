@@ -70,7 +70,13 @@ class BaseCompilerSpec extends BridgeProviderSpecification {
     def defaultStoreLocation: File = baseLocation.resolve("inc_data.zip").toFile
 
     def createCompiler() =
-      CompilerSetup(defaultClassesDir, baseLocation.toFile, allSources.toArray, allClasspath)
+      CompilerSetup(defaultClassesDir,
+                    baseLocation.toFile,
+                    allSources.toArray,
+                    allClasspath,
+                    IncOptions.of(),
+                    Seq("-Yrangepos"),
+                    Seq())
 
     def update(source: Path)(change: String => String): Unit = {
       import collection.JavaConverters._
@@ -97,7 +103,9 @@ class BaseCompilerSpec extends BridgeProviderSpecification {
       tempDir: File,
       sources: Array[File],
       classpath: Seq[File],
-      incOptions: IncOptions = IncOptions.of()
+      incOptions: IncOptions = IncOptions.of(),
+      scalacOptions: Seq[String] = Seq(),
+      javacOptions: Seq[String] = Seq(),
   ) {
     val noLogger = Logger.Null
     val compiler = new IncrementalCompilerImpl
@@ -127,17 +135,19 @@ class BaseCompilerSpec extends BridgeProviderSpecification {
                                Some(progress),
                                extra)
     val prev = compiler.emptyPreviousResult
-    val in = compiler.inputs(Array(classesDir) ++ si.allJars ++ classpath,
-                             sources,
-                             classesDir,
-                             Array(),
-                             Array(),
-                             maxErrors,
-                             Array(),
-                             CompileOrder.Mixed,
-                             cs,
-                             setup,
-                             prev)
+    val in = compiler.inputs(
+      Array(classesDir) ++ si.allJars ++ classpath,
+      sources,
+      classesDir,
+      scalacOptions.toArray,
+      javacOptions.toArray,
+      maxErrors,
+      Array(), // sourcePositionMappers
+      CompileOrder.Mixed,
+      cs,
+      setup,
+      prev
+    )
 
     def doCompile(newInputs: Inputs => Inputs = identity): CompileResult = {
       lastCompiledUnits = Set.empty

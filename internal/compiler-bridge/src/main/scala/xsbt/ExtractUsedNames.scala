@@ -9,7 +9,7 @@ package xsbt
 
 import java.util.{ HashMap => JavaMap }
 import java.util.{ HashSet => JavaSet }
-import java.util.EnumSet
+import java.util.{ ArrayList, EnumSet }
 
 import xsbti.UseScope
 
@@ -62,6 +62,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
   private final class NamesUsedInClass {
     // Default names and other scopes are separated for performance reasons
     val defaultNames: JavaSet[Name] = new JavaSet[global.Name]()
+    val defaultNamePositions: ArrayList[(Position, Name)] = new ArrayList[(Position, Name)]
     val scopedNames: JavaMap[Name, EnumSet[UseScope]] = new JavaMap[Name, EnumSet[UseScope]]()
 
     // We have to leave with commas on ends
@@ -161,6 +162,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
   private class ExtractUsedNamesTraverser extends Traverser {
 
     val usedNamesFromClasses = new JavaMap[Name, NamesUsedInClass]()
+    val usedNamePositions = new ArrayList[(Position, Name)]()
     val namesUsedAtTopLevel = new NamesUsedInClass
 
     override def traverse(tree: Tree): Unit = {
@@ -175,6 +177,18 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
         names.add(mangledName(symbol))
         ()
       }
+    }
+
+    val addSymbolPosition: (ArrayList[(Position, Name)], Symbol, Tree) => Unit = {
+      (namePositions: ArrayList[(Position, Name)], symbol: Symbol, tree: Tree) =>
+        // Synthetic names are no longer included. See https://github.com/sbt/sbt/issues/2537
+        if (!ignoredSymbol(symbol) && !isEmptyName(symbol.name)) {
+          val mn = mangledName(symbol)
+          namePositions.add((tree.pos, mn))
+          println(
+            s"addSymbolPosition $mn (${symbol.fullName}) \n    ${tree.getClass} ${tree.pos}. This is typed to ${tree.tpe}")
+          ()
+        }
     }
 
     /** Returns mutable set with all names from given class used in current context */
@@ -276,13 +290,16 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
 
       case t if t.hasSymbolField =>
         val symbol = t.symbol
-        if (symbol != rootMirror.RootPackage)
+        if (symbol != rootMirror.RootPackage) {
           addSymbol(getNamesOfEnclosingScope, t.symbol)
+          addSymbolPosition(getNamePositionsOfEnclosingScope, t.symbol, t)
+        }
 
         val tpe = t.tpe
         if (!ignoredType(tpe)) {
           // Initialize _currentOwner if it's not
           val cache = getNamesOfEnclosingScope
+          val positionCache = getNamePositionsOfEnclosingScope
           TypeDependencyTraverser.setCacheAndOwner(cache, _currentOwner)
           TypeDependencyTraverser.traverse(tpe)
         }
@@ -292,6 +309,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
     private var _currentOwner: Symbol = _
     private var _currentNonLocalClass: Symbol = _
     private var _currentNamesCache: JavaSet[Name] = _
+    private var _currentNamePositionsCache: ArrayList[(Position, Name)] = _
     private var _currentScopedNamesCache: JavaMap[Name, EnumSet[UseScope]] = _
 
     @inline private def resolveNonLocal(from: Symbol): Symbol = {
@@ -326,6 +344,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
         _currentNonLocalClass = resolveNonLocal(currentOwner)
         val usedInClass = namesInClass(_currentNonLocalClass)
         _currentNamesCache = usedInClass.defaultNames
+        _currentNamePositionsCache = usedInClass.defaultNamePositions
         _currentScopedNamesCache = usedInClass.scopedNames
       } else if (_currentOwner != currentOwner) {
         val nonLocalClass = resolveNonLocal(currentOwner)
@@ -334,6 +353,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
           _currentNonLocalClass = nonLocalClass
           val usedInClass = namesInClass(_currentNonLocalClass)
           _currentNamesCache = usedInClass.defaultNames
+          _currentNamePositionsCache = usedInClass.defaultNamePositions
           _currentScopedNamesCache = usedInClass.scopedNames
         }
       }
@@ -350,6 +370,19 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
     private def getNamesOfEnclosingScope: JavaSet[Name] = {
       updateCurrentOwner()
       _currentNamesCache
+    }
+
+    /**
+     * Return the names associated with the closest non-local class owner
+     * of a tree given `currentOwner`, defined and updated by `Traverser`.
+     *
+     * This method modifies the state associated with the names variable
+     * by calling `updateCurrentOwner()`.
+     */
+    @inline
+    private def getNamePositionsOfEnclosingScope: ArrayList[(Position, Name)] = {
+      updateCurrentOwner()
+      _currentNamePositionsCache
     }
   }
 }
