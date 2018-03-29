@@ -9,7 +9,7 @@ package xsbt
 
 import java.util.{ HashMap => JavaMap }
 import java.util.{ HashSet => JavaSet }
-import java.util.{ ArrayList, EnumSet }
+import java.util.EnumSet
 
 import xsbti.UseScope
 
@@ -59,24 +59,57 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
   import global._
   import JavaUtils._
 
+  private case class SimplePosition(line: Int, column: Int)
+  private type NamePositionMap = JavaMap[SimplePosition, NameInfo]
+  sealed trait NameType
+  private object NameType {
+    case object Def extends NameType
+    case object Use extends NameType
+  }
+  private final case class NameInfo(name: Name, fullName: String, nameType: NameType)
   private final class NamesUsedInClass {
     // Default names and other scopes are separated for performance reasons
     val defaultNames: JavaSet[Name] = new JavaSet[global.Name]()
-    val defaultNamePositions: ArrayList[(Position, Name)] = new ArrayList[(Position, Name)]
+    val defaultNamePositions: NamePositionMap = new NamePositionMap()
     val scopedNames: JavaMap[Name, EnumSet[UseScope]] = new JavaMap[Name, EnumSet[UseScope]]()
 
     // We have to leave with commas on ends
     override def toString(): String = {
-      val builder = new StringBuilder(": ")
+      val builder = new StringBuilder("\nused: ")
       defaultNames.foreach { name =>
         builder.append(name.decoded.trim)
         val otherScopes = scopedNames.get(name)
         if (otherScopes != null) {
           builder.append(" in [")
-          otherScopes.foreach(scope => builder.append(scope.name()).append(", "))
+          otherScopes.foreach { scope =>
+            builder.append(scope.name()).append(", ")
+            ()
+          }
           builder.append("]")
         }
         builder.append(", ")
+        ()
+      }
+      builder.append("\nused positions:")
+      defaultNamePositions.foreach {
+        case (pos, NameInfo(name, fullName, nameType)) =>
+          builder.append("\n (line: ")
+          builder.append(pos.line)
+          builder.append(", column: ")
+          builder.append(pos.column)
+          builder.append(") -> ")
+          builder.append(name.decode.trim)
+          builder.append("(")
+          builder.append(fullName)
+          builder.append(")")
+          nameType match {
+            case NameType.Def =>
+              builder.append(" defined,")
+            case NameType.Use =>
+              builder.append(" used,")
+            case _ =>
+          }
+          ()
       }
       builder.toString()
     }
@@ -96,7 +129,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
 
     // Handle names used at top level that cannot be related to an owner
     if (!defaultNamesTopLevel.isEmpty || !scopedNamesTopLevel.isEmpty) {
-      val responsible = firstClassOrModuleDef(tree)
+      val responsible: Option[global.Tree] = firstClassOrModuleDef(tree)
       responsible match {
         case Some(classOrModuleDef) =>
           val sym = classOrModuleDef.symbol
@@ -104,7 +137,6 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
           val firstClassName = className(firstClassSymbol)
           val namesInFirstClass = traverser.usedNamesFromClass(firstClassName)
           val scopedNamesInFirstClass = namesInFirstClass.scopedNames
-
           namesInFirstClass.defaultNames.addAll(defaultNamesTopLevel)
           scopedNamesTopLevel.foreach { (topLevelName, topLevelScopes) =>
             val existingScopes = scopedNamesInFirstClass.get(topLevelName)
@@ -114,6 +146,22 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
             ()
           }
 
+        case None =>
+          reporter.warning(unit.position(0), Feedback.OrphanNames)
+      }
+    }
+
+    // Handle names used at top level that cannot be related to an owner
+    val defaultNamePositionsTopLevel = namesUsedAtTopLevel.defaultNamePositions
+    if (!defaultNamePositionsTopLevel.isEmpty) {
+      val responsible = firstClassOrModuleDef(tree)
+      responsible match {
+        case Some(classOrModuleDef) =>
+          val sym = classOrModuleDef.symbol
+          val firstClassSymbol = enclOrModuleClass(sym)
+          val firstClassName = className(firstClassSymbol)
+          val namesInFirstClass = traverser.usedNamesFromClass(firstClassName)
+          namesInFirstClass.defaultNamePositions.putAll(defaultNamePositionsTopLevel)
         case None =>
           reporter.warning(unit.position(0), Feedback.OrphanNames)
       }
@@ -148,6 +196,17 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
         }
         callback.usedName(className, useName, useScopes)
       }
+      usedNames.defaultNamePositions.foreach {
+        case (pos, NameInfo(rawUsedName, fullName, nameType)) =>
+          val useName = rawUsedName.decoded.trim
+          nameType match {
+            case NameType.Use =>
+              callback.usedNamePosition(className, pos.line, pos.column, useName, fullName)
+            case NameType.Def =>
+              callback.definedNamePosition(className, pos.line, pos.column, useName, fullName)
+            case _ =>
+          }
+      }
     }
   }
 
@@ -162,7 +221,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
   private class ExtractUsedNamesTraverser extends Traverser {
 
     val usedNamesFromClasses = new JavaMap[Name, NamesUsedInClass]()
-    val usedNamePositions = new ArrayList[(Position, Name)]()
+    val usedNamePositions = new NamePositionMap()
     val namesUsedAtTopLevel = new NamesUsedInClass
 
     override def traverse(tree: Tree): Unit = {
@@ -179,14 +238,12 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
       }
     }
 
-    val addSymbolPosition: (ArrayList[(Position, Name)], Symbol, Tree) => Unit = {
-      (namePositions: ArrayList[(Position, Name)], symbol: Symbol, tree: Tree) =>
-        // Synthetic names are no longer included. See https://github.com/sbt/sbt/issues/2537
-        if (!ignoredSymbol(symbol) && !isEmptyName(symbol.name)) {
-          val mn = mangledName(symbol)
-          namePositions.add((tree.pos, mn))
-          println(
-            s"addSymbolPosition $mn (${symbol.fullName}) \n    ${tree.getClass} ${tree.pos}. This is typed to ${tree.tpe}")
+    val addSymbolPosition: (NamePositionMap, Symbol, Tree, NameType) => Unit = {
+      (namePositions: NamePositionMap, symbol: Symbol, tree: Tree, nameType: NameType) =>
+        val position = SimplePosition(tree.pos.line, tree.pos.column)
+        if (!namePositions.containsKey(position) && !ignoredSymbol(symbol) && !isEmptyName(
+              symbol.name)) {
+          namePositions.put(position, NameInfo(mangledName(symbol), symbol.fullName, nameType))
           ()
         }
     }
@@ -241,7 +298,6 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
       def setCacheAndOwner(cache: JavaSet[Name], owner: Symbol): Unit = {
         if (ownerVisited != owner) {
           val ts = ownersCache.get(owner)
-
           if (ts == null) {
             val newVisited = new JavaSet[Type]()
             visited = newVisited
@@ -262,8 +318,10 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
     private def handleClassicTreeNode(tree: Tree): Unit = tree match {
       // Register names from pattern match target type in PatMatTarget scope
       case ValDef(mods, _, tpt, _) if mods.isCase && mods.isSynthetic =>
-        updateCurrentOwner()
+        addSymbolPosition(getNamePositionsOfEnclosingScope, tree.symbol, tree, NameType.Def)
         PatMatDependencyTraverser.traverse(tpt.tpe)
+      case _: ValOrDefDef | _: TypeDef | _: ClassDef | _: ModuleDef if !tree.symbol.isConstructor =>
+        addSymbolPosition(getNamePositionsOfEnclosingScope, tree.symbol, tree, NameType.Def)
       case _: DefTree | _: Template => ()
       case Import(_, selectors: List[ImportSelector]) =>
         val names = getNamesOfEnclosingScope
@@ -292,14 +350,13 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
         val symbol = t.symbol
         if (symbol != rootMirror.RootPackage) {
           addSymbol(getNamesOfEnclosingScope, t.symbol)
-          addSymbolPosition(getNamePositionsOfEnclosingScope, t.symbol, t)
+          addSymbolPosition(getNamePositionsOfEnclosingScope, t.symbol, t, NameType.Use)
         }
 
         val tpe = t.tpe
         if (!ignoredType(tpe)) {
           // Initialize _currentOwner if it's not
           val cache = getNamesOfEnclosingScope
-          val positionCache = getNamePositionsOfEnclosingScope
           TypeDependencyTraverser.setCacheAndOwner(cache, _currentOwner)
           TypeDependencyTraverser.traverse(tpe)
         }
@@ -309,7 +366,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
     private var _currentOwner: Symbol = _
     private var _currentNonLocalClass: Symbol = _
     private var _currentNamesCache: JavaSet[Name] = _
-    private var _currentNamePositionsCache: ArrayList[(Position, Name)] = _
+    private var _currentNamePositionsCache: NamePositionMap = _
     private var _currentScopedNamesCache: JavaMap[Name, EnumSet[UseScope]] = _
 
     @inline private def resolveNonLocal(from: Symbol): Symbol = {
@@ -380,7 +437,7 @@ class ExtractUsedNames[GlobalType <: CallbackGlobal](val global: GlobalType)
      * by calling `updateCurrentOwner()`.
      */
     @inline
-    private def getNamePositionsOfEnclosingScope: ArrayList[(Position, Name)] = {
+    private def getNamePositionsOfEnclosingScope: NamePositionMap = {
       updateCurrentOwner()
       _currentNamePositionsCache
     }

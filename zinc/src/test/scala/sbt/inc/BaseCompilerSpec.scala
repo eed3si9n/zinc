@@ -105,7 +105,7 @@ class BaseCompilerSpec extends BridgeProviderSpecification {
       classpath: Seq[File],
       incOptions: IncOptions = IncOptions.of(),
       scalacOptions: Seq[String] = Seq(),
-      javacOptions: Seq[String] = Seq(),
+      javacOptions: Seq[String] = Seq()
   ) {
     val noLogger = Logger.Null
     val compiler = new IncrementalCompilerImpl

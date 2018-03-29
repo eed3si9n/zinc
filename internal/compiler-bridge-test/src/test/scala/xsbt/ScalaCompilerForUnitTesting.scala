@@ -35,9 +35,13 @@ class ScalaCompilerForUnitTesting {
     tempSrcFiles.map(analysisCallback.apis)
   }
 
-  def extractUsedNamesFromSrc(src: String): Map[String, Set[String]] = {
+  def extractUsedNamesFromSrc(src: String): (Map[String, Set[String]],
+                                             Map[String, Set[(Int, Int, String)]],
+                                             Map[String, Set[(Int, Int, String)]]) = {
     val (_, analysisCallback) = compileSrcs(src)
-    analysisCallback.usedNames.toMap
+    (analysisCallback.usedNames.toMap,
+     analysisCallback.usedPositionFullNames.toMap,
+     analysisCallback.definedPositionFullNames.toMap)
   }
 
   def extractBinaryClassNamesFromSrc(src: String): Set[(String, String)] = {
@@ -76,14 +80,30 @@ class ScalaCompilerForUnitTesting {
    * The previous source files are provided to successfully compile examples.
    * Only the names used in the last src file are returned.
    */
-  def extractUsedNamesFromSrc(sources: String*): Map[String, Set[String]] = {
+  def extractUsedNamesFromSrc(sources: String*): (Map[String, Set[String]],
+                                                  Map[String, Set[(Int, Int, String)]],
+                                                  Map[String, Set[(Int, Int, String)]]) = {
     val (srcFiles, analysisCallback) = compileSrcs(sources: _*)
     srcFiles
       .map { srcFile =>
         val classesInSrc = analysisCallback.classNames(srcFile).map(_._1)
-        classesInSrc.map(className => className -> analysisCallback.usedNames(className)).toMap
+        (
+          classesInSrc.map(className => className -> analysisCallback.usedNames(className)).toMap,
+          classesInSrc
+            .map(className =>
+              className -> analysisCallback.usedPositionFullNames
+                .getOrElse(className, Set[(Int, Int, String)]()))
+            .toMap,
+          classesInSrc
+            .map(className =>
+              className -> analysisCallback.definedPositionFullNames
+                .getOrElse(className, Set[(Int, Int, String)]()))
+            .toMap
+        )
       }
-      .reduce(_ ++ _)
+      .reduce { (acc, x) =>
+        (acc._1 ++ x._1, acc._2 ++ x._2, acc._3 ++ x._3)
+      }
   }
 
   /**

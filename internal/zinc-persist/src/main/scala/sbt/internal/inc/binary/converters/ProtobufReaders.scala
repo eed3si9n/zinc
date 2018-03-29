@@ -154,9 +154,15 @@ final class ProtobufReaders(mapper: ReadMapper) {
     val mainClasses = sourceInfo.mainClasses
     val reportedProblems = sourceInfo.reportedProblems.map(fromProblem)
     val unreportedProblems = sourceInfo.unreportedProblems.map(fromProblem)
-    SourceInfos.makeInfo(reported = reportedProblems,
-                         unreported = unreportedProblems,
-                         mainClasses = mainClasses)
+    val usedNamePositions = sourceInfo.usedNamePositions.map(fromNamePosition)
+    val definedNamePositions = sourceInfo.definedNamePositions.map(fromNamePosition)
+    SourceInfos.makeInfo(
+      reported = reportedProblems,
+      unreported = unreportedProblems,
+      mainClasses = mainClasses,
+      usedNamePositions = usedNamePositions,
+      definedNamePositions = definedNamePositions
+    )
   }
 
   def fromSourceInfos(sourceInfos0: schema.SourceInfos): SourceInfos = {
@@ -639,4 +645,12 @@ final class ProtobufReaders(mapper: ReadMapper) {
     val miniSetup = analysisFile.miniSetup.read(fromMiniSetup, ???)
     (analysis, miniSetup, version)
   }
+
+  def fromNamePosition(namePosition: schema.NamePosition): NamePosition = {
+    NamePosition.apply(namePosition.line,
+                       namePosition.column,
+                       namePosition.name,
+                       namePosition.fullName)
+  }
+
 }
