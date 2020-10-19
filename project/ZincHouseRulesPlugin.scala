@@ -3,7 +3,7 @@ import Keys._
 import bintray.BintrayPlugin
 import bintray.BintrayPlugin.autoImport._
 
-object HouseRulesPlugin extends AutoPlugin {
+object ZincHouseRulesPlugin extends AutoPlugin {
   override def requires = plugins.JvmPlugin && BintrayPlugin
   override def trigger = allRequirements
 

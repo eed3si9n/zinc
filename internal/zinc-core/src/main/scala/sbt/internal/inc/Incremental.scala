@@ -28,7 +28,7 @@ import xsbt.api.{ APIUtil, HashAPI, NameHashing }
 import xsbti.api._
 import xsbti.compile.{
   AnalysisContents,
-  AnalysisStore,
+  AnalysisStore => XAnalysisStore,
   CompileAnalysis,
   CompileProgress,
   DependencyChanges,
@@ -132,7 +132,7 @@ object Incremental {
       output: Output,
       outputJarContent: JarUtils.OutputJarContent,
       earlyOutput: Option[Output],
-      earlyAnalysisStore: Option[AnalysisStore],
+      earlyAnalysisStore: Option[XAnalysisStore],
       progress: Option[CompileProgress],
       log: Logger
   )(
@@ -233,7 +233,7 @@ object Incremental {
       output: Output,
       outputJarContent: JarUtils.OutputJarContent,
       earlyOutput: Option[Output],
-      earlyAnalysisStore: Option[AnalysisStore],
+      earlyAnalysisStore: Option[XAnalysisStore],
       progress: Option[CompileProgress],
       log: Logger
   )(
@@ -539,7 +539,7 @@ private object AnalysisCallback {
       output: Output,
       outputJarContent: JarUtils.OutputJarContent,
       earlyOutput: Option[Output],
-      earlyAnalysisStore: Option[AnalysisStore],
+      earlyAnalysisStore: Option[XAnalysisStore],
       pickleJarPair: Option[(Path, Path)],
       progress: Option[CompileProgress],
       log: Logger
@@ -586,7 +586,7 @@ private final class AnalysisCallback(
     lookup: Lookup,
     output: Output,
     earlyOutput: Option[Output],
-    earlyAnalysisStore: Option[AnalysisStore],
+    earlyAnalysisStore: Option[XAnalysisStore],
     pickleJarPair: Option[(Path, Path)],
     progress: Option[CompileProgress],
     incHandlerOpt: Option[Incremental.IncrementalCallback],
